@@ -79,7 +79,7 @@ def get_FE_design_matrix(data, n_h, L):
 
     Return N x n_h finite element design matrix S with S_ij = e_j(X_i)
     """
-    
+
     K = n_h - 1
     h = L/K
     S = np.zeros((data.shape[0], n_h))
@@ -89,7 +89,6 @@ def get_FE_design_matrix(data, n_h, L):
         S[i,j] = -x_i/h + j + 1
         S[i, j+1] = x_i/h - j
     return S
-
 
 # ground truth and comparison vectors
 
@@ -107,24 +106,24 @@ def get_ground_truth_vector(data, L, kappa, s, M):
             sum_x += ((kappa + ((i*np.pi)/L)**2)**(-s/2))*(alpha[i]*np.cos((i*np.pi*x)/L) + beta[i]*np.sin((i*np.pi*x)/L))
         f_x = cnst + scalar*sum_x
         f_0.append(f_x)
-    
+
     return np.array(f_0)
 
-
-random.seed(666)
+np.random.seed(666)
 
 N = 100
 L = 5
 kappa = 5
 s = 2
 tau = 2
-M = 100
+M = 500
 n_h = 50
 
 data = np.random.uniform(0, L, N)
 data = data.reshape((N, 1))
+f_0 = get_ground_truth_vector(data, L, kappa, s, M)
 
-def generate_data(N, L, n_h, kappa, s, tau):
+def generate_data(N, L, n_h, kappa, s, tau, f_N):
     """
     N: sample size
     L: upper limit of domain
@@ -136,10 +135,12 @@ def generate_data(N, L, n_h, kappa, s, tau):
     Returns posterior vectors F_cf, F_fe in R^N with data generated from Uniform(0,L)
     """
 
+    f_N = f_N.reshape(f_N.shape[0],)
+
     # Setting 1: Matern covariance
     I_N = np.eye(N)
     Sigma = get_Matern_covariance(data, kappa, s)
-    f_N = np.random.multivariate_normal(mean = np.zeros(N), cov = Sigma)
+    #f_N = np.random.multivariate_normal(mean = np.zeros(N), cov = Sigma)
     y_cf = np.random.multivariate_normal(mean = f_N, cov = (tau^2)*I_N)
     block1 = Sigma + (tau^2)*I_N
     F_cf = Sigma @ la.solve(block1, y_cf)
@@ -147,47 +148,39 @@ def generate_data(N, L, n_h, kappa, s, tau):
     # Setting 2: Finite element
     M, G = get_mass_matrix(n_h, L), get_stiffness_matrix(n_h, L)
     Q = get_FE_precision_matrix(M, G, kappa, s)
-    
-    evals_Q = la.eigvalsh(Q)
-    
-    #print("smallest eigenvalue of Q is {v}".format(v = evals_Q[0]))
 
     S = get_FE_design_matrix(data, n_h, L)
-
-    #print("max row sum in S is {s}".format(s = np.max(S.sum(axis=1))))
-    #print("min row sum in S is {s}".format(s = np.min(S.sum(axis=1))))
 
     w = np.random.multivariate_normal(mean = np.zeros(Q.shape[0]), cov = la.inv(Q))
     y_fe = np.random.multivariate_normal(mean = S @ w, cov = (tau^2)*I_N)
     block2 = S.T @ S + (tau**2)*Q
-    
-    #print(np.allclose(block2, S.T @ S + (tau**2)*Q))
-    #print("rank of block2 is {r} and dimension is {d}".format(r = la.matrix_rank(block2), d = block2.shape)) # PROBLEM HERE
 
-    evals_block2 = la.eigvalsh(block2)
-    #print("smallest eigenvalue of block2 is {v}".format(v = evals_block2[0]))
-    #F_fe = S @ la.inv(block2) @ S.T @ y_fe
     F_fe = S @ la.solve(block2, S.T @ y_fe)
 
     return np.array([F_cf, F_fe])
 
 reps = 20
 
+
 nums = np.arange(2, 200, 5)
 nums = [int(num) for num in nums]
-errs = []
+errs_cf, errs_fe = [], []
 for n_h in nums:
     print(n_h)
-    avg_error = 0
+    avg_error_cf, avg_error_fe = 0, 0
     for rep in range(reps):
-        F = generate_data(N, L, n_h, kappa, s , tau)
+        F = generate_data(N, L, n_h, kappa, s , tau, f_0)
         F_cf = F[0,:]
         F_fe = F[1,:]
-        f_0 = get_ground_truth_vector(data, L, kappa, s, M)
-        avg_error += la.norm(F_cf - f_0)/N
 
-    errs.append(avg_error/reps)
-    print(errs[-1])
+        avg_error_cf += la.norm(F_cf - f_0)/N
+        avg_error_fe += la.norm(F_fe - f_0)/N
 
-plot_data = np.array([nums, errs])
+    errs_cf.append(avg_error_cf/reps)
+    errs_fe.append(avg_error_fe/reps)
+
+    print(errs_cf[-1], errs_fe[-1])
+
+plot_data = np.array([nums, errs_cf, errs_fe])
 plt.plot(plot_data[0], plot_data[1])
+plt.plot(plot_data[0], plot_data[2])
